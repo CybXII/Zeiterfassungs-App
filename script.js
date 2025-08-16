@@ -138,25 +138,29 @@ checkOutBtn.addEventListener("click", async () => {
 
   // Zeiten als HH:MM:SS
   const startStr = fmtHHMMSS(new Date(startTime));
-  const endStr = fmtHHMMSS(new Date(endTime));
+  const endStr   = fmtHHMMSS(new Date(endTime));
 
   // Pausen/Arbeitszeit in Sekunden berechnen
   const pauseSecRaw = Math.floor(pauseMs / 1000);
-  const diffSec = Math.max(0, Math.floor((endTime - startTime) / 1000));
-  let pauseSec = pauseSecRaw;
+  const diffSec     = Math.max(0, Math.floor((endTime - startTime) / 1000));
+  let   pauseSec    = pauseSecRaw;
 
-  // Gesetzliche Logik:
-  // Wenn > 6h gearbeitet und KEINE Pause gestempelt, dann alles oberhalb 6h als Pause anrechnen.
-  const workedSecAssumingNoPause = diffSec - pauseSec; // reale Arbeitssekunden ohne weitere Anpassungen
-  if (workedSecAssumingNoPause > 6 * 3600 && pauseSec === 0) {
-    pauseSec = workedSecAssumingNoPause - 6 * 3600;
+  // Mindestpausen-Logik:
+  // > 6h bis ≤ 9h -> 30 Minuten, > 9h -> 45 Minuten
+  const requiredPauseSec =
+    diffSec > 9 * 3600 ? 45 * 60 :
+    diffSec > 6 * 3600 ? 30 * 60 : 0;
+
+  // Falls zu wenig Pause gestempelt wurde, auf Mindestpause auffüllen
+  if (pauseSec < requiredPauseSec) {
+    pauseSec = requiredPauseSec;
   }
 
   const payload = {
     date: new Date(startTime).toISOString().split("T")[0],
-    start: startStr,                  // HH:MM:SS
-    end: endStr,                      // HH:MM:SS
-    pause: msToHHMMSS(pauseSec * 1000), // HH:MM:SS
+    start: startStr,                         // HH:MM:SS
+    end:   endStr,                           // HH:MM:SS
+    pause: msToHHMMSS(pauseSec * 1000),      // HH:MM:SS
     description: "",
     id: user.id,
     vorname: user.vorname,
@@ -177,6 +181,7 @@ checkOutBtn.addEventListener("click", async () => {
     resetTimers();
   }
 });
+
 
 // ========== PAUSE START ==========
 startBreakBtn.addEventListener("click", () => {
