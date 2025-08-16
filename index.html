@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zeiterfassung</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Login-Bereich -->
+  <div id="user-prompt">
+    <h2>Mitarbeiter Login</h2>
+    <label for="user-id">Mitarbeiter-ID:</label>
+    <input type="text" id="user-id" placeholder="z. B. 0001" autocomplete="off" />
+    <button id="user-login">Einloggen</button>
+    <p id="login-error" class="error"></p>
+  </div>
+
+  <!-- Zeiterfassungsbereich -->
+  <div class="container" id="app-section" style="display: none;">
+    <h1>Zeiterfassung</h1>
+
+    <p id="welcome-message"></p>
+
+    <!-- Laufender Timer -->
+    <div id="timers">
+      <p><strong>Arbeitszeit:</strong> <span id="work-timer">00:00:00</span></p>
+      <p><strong>Pausenzeit:</strong> <span id="pause-timer">00:00:00</span></p>
+    </div>
+
+    <!-- Buttons -->
+    <section id="live-controls">
+      <button id="btn-check-in">Check-in</button>
+      <button id="btn-start-break" disabled>Pause starten</button>
+      <button id="btn-end-break" disabled>Pause beenden</button>
+      <button id="btn-check-out" disabled>Check-out</button>
+    </section>
+
+    <!-- Nachträgliche Eingabe -->
+    <section id="manual-entry">
+      <h2>Nachträglich erfassen</h2>
+      <form id="manual-form" autocomplete="off">
+        <label for="date">Datum:</label>
+        <input type="date" id="date" name="date" required />
+
+        <label for="start">Startzeit (hh:mm:ss):</label>
+        <input type="time" id="start" name="start" required step="1" />
+
+        <label for="end">Endzeit (hh:mm:ss):</label>
+        <input type="time" id="end" name="end" required step="1" />
+
+        <label for="pause">Pause (hh:mm:ss):</label>
+        <input type="time" id="pause" name="pause" step="1" value="00:00:00" />
+
+        <label for="note">Beschreibung (optional):</label>
+        <input type="text" id="note" name="note" placeholder="z. B. Projektarbeit" />
+
+        <button type="submit">Senden</button>
+      </form>
+    </section>
+
+    <div id="status-message"></div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

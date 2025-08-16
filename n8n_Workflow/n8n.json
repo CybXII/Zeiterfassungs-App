@@ -1,0 +1,368 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "<Deine GOOGLE-SHEET-ID>",
+          "mode": "list",
+          "cachedResultName": "Arbeitszeiten"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 827808896,
+          "mode": "list",
+          "cachedResultName": "Mitarbeiter"
+        },
+        "options": {}
+      },
+      "id": "14e10fdf-29cb-4629-8659-49af477aa57c",
+      "name": "Google Sheets - Mitarbeiter",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        100,
+        180
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "c8bfd0e7-aa83-4d3a-b0d4-ed2986b7af0f",
+      "name": "Antwort an Client",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        620,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Hole die übergebene ID aus dem Webhook-Body\nconst mitarbeiterId = $items(\"Mitarbeiter Check\")[0].json.body?.id?.toString().trim();\n\n// Alle Zeilen aus Google Sheets prüfen\nconst matches = items.filter(item => {\n  const id = (item.json[\"Mitarbeiter-ID\"] || \"\").toString().trim();\n  return id === mitarbeiterId;\n});\n\nif (matches.length > 0) {\n  const match = matches[0].json;\n  return [{\n    json: {\n      exists: true,\n      searchId: mitarbeiterId,\n      matchId: match[\"Mitarbeiter-ID\"],\n      vorname: match[\"Vorname\"] || null,\n      nachname: match[\"Nachname\"] || null\n    }\n  }];\n} else {\n  return [{\n    json: {\n      exists: false,\n      searchId: mitarbeiterId,\n      matchId: null\n    }\n  }];\n}"
+      },
+      "id": "c1b14d58-1b69-4e0d-ace9-a09e0bdcc18b",
+      "name": "Mitarbeiter-ID prüfen1",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        360,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Body robust auslesen (Webhook liefert oft unter $json.body)\nconst body = $json.body ?? $json;\n\n// Felder normalisieren\nconst date = body.date; // YYYY-MM-DD\nconst id = (body.id ?? body.mitarbeiterId ?? body[\"Mitarbeiter-ID\"])?.toString().trim();\n\n// Zeit -> HH:MM:SS normalisieren (falls HH:MM kommt)\nfunction normTime(s) {\n  if (!s) return null;\n  const parts = s.toString().split(':');\n  const hh = (parts[0] ?? '00').padStart(2,'0');\n  const mm = (parts[1] ?? '00').padStart(2,'0');\n  const ss = (parts[2] ?? '00').padStart(2,'0');\n  return `${hh}:${mm}:${ss}`;\n}\n\nconst startNorm = normTime(body.start);\n\n// Key als YYYY-MM-DD_ID_HHMMSS (ohne Doppelpunkte)\nconst startKey = startNorm ? startNorm.replace(/:/g,'') : '000000';\nconst erfassungsId = `${date}_${id}_${startKey}`;\n\nreturn [{\n  json: {\n    ...body,                      // date, start, end, pause, description, id, vorname, nachname\n    id,\n    start: startNorm ?? body.start ?? null,\n    erfassungsId,\n    \"Erfassungs-ID\": erfassungsId\n  }\n}];\n"
+      },
+      "id": "4d93f0a1-bc94-4a42-b47c-43313751b21b",
+      "name": "Erfassungs-ID generieren",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -420,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "range": "Zeiterfassung!A:K",
+        "options": {}
+      },
+      "id": "ee21ba0b-1210-4ad9-87ba-95968fa02f89",
+      "name": "Zeiterfassung lesen",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 1,
+      "position": [
+        -220,
+        780
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Explizit aus benannten Nodes lesen (keine Merge nötig)\nconst input = $node[\"Erfassungs-ID generieren\"].json;          // enthält \"Erfassungs-ID\"\nconst rows = $items(\"Zeiterfassung lesen\").map(i => i.json);   // alle Tabellenzeilen\n\nconst key = input[\"Erfassungs-ID\"] || input.erfassungsId || \"\";\nconst match = rows.find(r => (r[\"Erfassungs-ID\"] || \"\").toString().trim() === key);\nconst rowIndex = match ? (rows.findIndex(r => r[\"Erfassungs-ID\"] === match[\"Erfassungs-ID\"]) + 2) : null; // +2: Header + 1-based\n\n// Für Folge-Nodes flach aufbereiten\nconst base = { ...input, \"Erfassungs-ID\": key };\n\nlet out;\nif (match) {\n  out = {\n    ...base,\n    Datum: match.Datum || input.date,\n    Startzeit: match.Startzeit || null,         // ALT aus Sheet\n    Endzeit:   match.Endzeit   || null,\n    Pause:     input.pause ?? match.Pause ?? \"00:00:00\",\n    Beschreibung: input.description ?? match.Beschreibung ?? \"\",\n    \"Mitarbeiter-ID\": match[\"Mitarbeiter-ID\"] || input.id,\n    Vorname: match.Vorname || input.vorname || \"\",\n    Nachname: match.Nachname || input.nachname || \"\"\n  };\n} else {\n  out = {\n    ...base,\n    Datum: input.date,\n    Beschreibung: input.description || \"\",\n    \"Mitarbeiter-ID\": input.id,\n    Vorname: input.vorname || \"\",\n    Nachname: input.nachname || \"\"\n  };\n}\n\nreturn [{ json: { ...out, rowIndex } }];\n"
+      },
+      "id": "436b5fa8-9b26-4973-b6c1-350f595bebb9",
+      "name": "Prüfe ob ID existiert",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        0,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.rowIndex}}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "eb4b8b02-a0d2-4b29-a98c-ecc069e632b2",
+      "name": "Existiert Eintrag?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        180,
+        780
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "function toSeconds(t){\n  if (!t) return 0;\n  const parts = t.toString().split(':').map(Number);\n  const [h,m,s] = [parts[0]||0, parts[1]||0, parts[2]||0];\n  return h*3600 + m*60 + s;\n}\nfunction toHHMMSS(sec){\n  const sign = sec < 0 ? \"-\" : \"\";\n  sec = Math.max(0, Math.abs(sec));\n  const h = String(Math.floor(sec/3600)).padStart(2,'0');\n  const m = String(Math.floor((sec%3600)/60)).padStart(2,'0');\n  const s = String(sec%60).padStart(2,'0');\n  return `${sign}${h}:${m}:${s}`;\n}\n\n// Kandidaten: ALT aus Sheet (Startzeit/Endzeit) + NEU vom Webhook (start/end)\nconst startCandidates = [ $json.Startzeit, $json.start ].filter(Boolean).map(toSeconds);\nconst endCandidates   = [ $json.Endzeit,   $json.end   ].filter(Boolean).map(toSeconds);\n\nconst minStartSec = startCandidates.length ? Math.min(...startCandidates) : 0;\nconst maxEndSec   = endCandidates.length   ? Math.max(...endCandidates)   : minStartSec;\n\nconst pauseSec = toSeconds($json.pause || $json.Pause || \"00:00:00\");\nconst workedSec = Math.max(0, maxEndSec - minStartSec - pauseSec);\n\nreturn [{\n  json: {\n    Datum: $json.Datum || $json.date,\n    Startzeit: toHHMMSS(minStartSec),\n    Endzeit:   toHHMMSS(maxEndSec),\n    Pause:     toHHMMSS(pauseSec),\n    Beschreibung: $json.Beschreibung || $json.description || \"\",\n    Arbeitsstunden: toHHMMSS(workedSec),\n    \"Mitarbeiter-ID\": $json[\"Mitarbeiter-ID\"] || $json.id,\n    Vorname: $json.Vorname || $json.vorname || \"\",\n    Nachname: $json.Nachname || $json.nachname || \"\",\n    \"Erfassungs-ID\": $json[\"Erfassungs-ID\"] || $json.erfassungsId\n  }\n}];\n"
+      },
+      "id": "1d8fd096-b63b-4449-8779-36c0cd20d779",
+      "name": "Aktualisiere Zeiten",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        420,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "operation": "update",
+        "range": "Zeiterfassung!A:K",
+        "key": "Erfassungs-ID",
+        "options": {}
+      },
+      "id": "6bd8311c-b81f-499e-aaee-919dd6dbf833",
+      "name": "Zeile aktualisieren",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 1,
+      "position": [
+        620,
+        640
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "function toSeconds(t){\n  if (!t) return 0;\n  const parts = t.toString().split(':').map(Number);\n  const [h,m,s] = [parts[0]||0, parts[1]||0, parts[2]||0];\n  return h*3600 + m*60 + s;\n}\nfunction toHHMMSS(sec){\n  const sign = sec < 0 ? \"-\" : \"\";\n  sec = Math.max(0, Math.abs(sec));\n  const h = String(Math.floor(sec/3600)).padStart(2,'0');\n  const m = String(Math.floor((sec%3600)/60)).padStart(2,'0');\n  const s = String(sec%60).padStart(2,'0');\n  return `${sign}${h}:${m}:${s}`;\n}\n\nconst startSec = toSeconds($json.start || ($json.body && $json.body.start));\nconst endSec   = toSeconds($json.end   || ($json.body && $json.body.end));\nconst pauseSec = toSeconds($json.pause || \"00:00:00\");\nconst workedSec = Math.max(0, endSec - startSec - pauseSec);\n\nreturn [{\n  json: {\n    Datum: $json.Datum || $json.date,\n    Startzeit: toHHMMSS(startSec),\n    Endzeit:   toHHMMSS(endSec),\n    Pause:     toHHMMSS(pauseSec),\n    Beschreibung: $json.Beschreibung || $json.description || \"\",\n    Arbeitsstunden: toHHMMSS(workedSec),\n    \"Mitarbeiter-ID\": $json[\"Mitarbeiter-ID\"] || $json.id,\n    Vorname: $json.Vorname || $json.vorname || \"\",\n    Nachname: $json.Nachname || $json.nachname || \"\",\n    \"Erfassungs-ID\": $json[\"Erfassungs-ID\"] || $json.erfassungsId\n  }\n}];\n"
+      },
+      "id": "b2211127-091c-4b3a-9ed4-7a040c8168b3",
+      "name": "Berechne neue Zeiten",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        420,
+        940
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "operation": "append",
+        "range": "Zeiterfassung!A:K",
+        "options": {}
+      },
+      "id": "0342efc1-4bd2-489b-b14e-d740ee7d0957",
+      "name": "Neue Zeile hinzufügen",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 1,
+      "position": [
+        620,
+        940
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": ""
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "check-mitarbeiter",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "9b62f18d-7ddd-4f36-8ef5-c4e657fcda03",
+      "name": "Mitarbeiter Check",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        180
+      ],
+      "webhookId": "check-mitarbeiter"
+    },
+    {
+      "parameters": {
+        "httpMethod": "PUT",
+        "path": "zeiterfassung",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "a38605fd-eb10-4da5-87b7-d6855c80832b",
+      "name": "Zeiterfassung",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -620,
+        780
+      ],
+      "webhookId": "0b8f80b8-138c-4557-aa86-1c3d7d808a7a"
+    }
+  ],
+  "connections": {
+    "Google Sheets - Mitarbeiter": {
+      "main": [
+        [
+          {
+            "node": "Mitarbeiter-ID prüfen1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mitarbeiter-ID prüfen1": {
+      "main": [
+        [
+          {
+            "node": "Antwort an Client",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Erfassungs-ID generieren": {
+      "main": [
+        [
+          {
+            "node": "Zeiterfassung lesen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zeiterfassung lesen": {
+      "main": [
+        [
+          {
+            "node": "Prüfe ob ID existiert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prüfe ob ID existiert": {
+      "main": [
+        [
+          {
+            "node": "Existiert Eintrag?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Existiert Eintrag?": {
+      "main": [
+        [
+          {
+            "node": "Aktualisiere Zeiten",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Berechne neue Zeiten",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aktualisiere Zeiten": {
+      "main": [
+        [
+          {
+            "node": "Zeile aktualisieren",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zeile aktualisieren": {
+      "main": [
+        []
+      ]
+    },
+    "Berechne neue Zeiten": {
+      "main": [
+        [
+          {
+            "node": "Neue Zeile hinzufügen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Neue Zeile hinzufügen": {
+      "main": [
+        []
+      ]
+    },
+    "Mitarbeiter Check": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - Mitarbeiter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zeiterfassung": {
+      "main": [
+        [
+          {
+            "node": "Erfassungs-ID generieren",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f17151227f25de2714336199cf93b55779e887737d192583f1d5933185e141d3"
+  }
+}
